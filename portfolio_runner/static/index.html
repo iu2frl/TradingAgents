@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TradingAgents · Research Portfolio</title>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --line: #26303d;
+    --text: #e6edf3; --muted: #8b949e;
+    --up: #3fb950; --down: #f85149; --flat: #d29922; --accent: #58a6ff;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.5 "Segoe UI", system-ui, sans-serif; }
+  header { display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+           padding: 16px 24px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  h1 { font-size: 17px; margin: 0; font-weight: 600; }
+  .badge { padding: 3px 10px; border-radius: 999px; font-size: 12px;
+           border: 1px solid var(--line); color: var(--muted); }
+  .badge.running { color: var(--accent); border-color: var(--accent); }
+  .spacer { flex: 1; }
+  main { padding: 24px; display: grid; gap: 20px; max-width: 1400px; margin: 0 auto; }
+  .kpis { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+  .card h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .07em;
+             color: var(--muted); margin: 0 0 8px; font-weight: 600; }
+  .value { font-size: 26px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .up { color: var(--up); } .down { color: var(--down); } .flat { color: var(--flat); }
+  .grid2 { display: grid; gap: 20px; grid-template-columns: 2fr 1fr; }
+  @media (max-width: 1000px) { .grid2 { grid-template-columns: 1fr; } }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th { text-align: right; font-size: 11px; text-transform: uppercase; letter-spacing: .05em;
+       color: var(--muted); padding: 8px; border-bottom: 1px solid var(--line); }
+  th:first-child, td:first-child { text-align: left; }
+  td { padding: 8px; border-bottom: 1px solid rgba(38,48,61,.5); text-align: right; }
+  tbody tr:hover { background: rgba(88,166,255,.06); }
+  .tag { font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 600; }
+  .tag.BUY { background: rgba(63,185,80,.15); color: var(--up); }
+  .tag.SELL { background: rgba(248,81,73,.15); color: var(--down); }
+  .tag.HOLD { background: rgba(210,153,34,.15); color: var(--flat); }
+  .log { max-height: 300px; overflow-y: auto; font-family: Consolas, monospace; font-size: 12px; }
+  .log div { padding: 3px 0; border-bottom: 1px solid rgba(38,48,61,.4); }
+  .log .ts { color: var(--muted); margin-right: 8px; }
+  .log .error { color: var(--down); } .log .warn { color: var(--flat); }
+  .log .trade { color: var(--accent); }
+  .empty { color: var(--muted); padding: 16px 8px; }
+  svg { width: 100%; height: 220px; display: block; }
+</style>
+</head>
+<body>
+<header>
+  <h1>TradingAgents · Research Portfolio</h1>
+  <span id="status" class="badge">connecting…</span>
+  <span id="cycle" class="badge">cycle 0</span>
+  <div class="spacer"></div>
+  <span id="next" class="badge">next run —</span>
+</header>
+
+<main>
+  <section class="kpis">
+    <div class="card"><h2>Total equity</h2><div id="equity" class="value">—</div>
+      <div id="equitySub" class="sub">—</div></div>
+    <div class="card"><h2>Total P&amp;L</h2><div id="pnl" class="value">—</div>
+      <div id="pnlSub" class="sub">—</div></div>
+    <div class="card"><h2>Realized</h2><div id="realized" class="value">—</div>
+      <div class="sub">closed positions</div></div>
+    <div class="card"><h2>Unrealized</h2><div id="unrealized" class="value">—</div>
+      <div class="sub">open positions</div></div>
+    <div class="card"><h2>Cash</h2><div id="cash" class="value">—</div>
+      <div id="cashSub" class="sub">—</div></div>
+  </section>
+
+  <section class="card">
+    <h2>Equity curve</h2>
+    <svg id="chart" viewBox="0 0 1000 220" preserveAspectRatio="none"></svg>
+  </section>
+
+  <section class="grid2">
+    <div class="card">
+      <h2>Pool</h2>
+      <table><thead><tr>
+        <th>Symbol</th><th>Signal</th><th>Qty</th><th>Avg cost</th><th>Last</th>
+        <th>Value</th><th>P&amp;L</th><th>%</th>
+      </tr></thead><tbody id="pool"></tbody></table>
+    </div>
+    <div class="card">
+      <h2>Latest ratings</h2>
+      <table><thead><tr>
+        <th>Symbol</th><th>Action</th><th>Rating</th><th>Price</th>
+      </tr></thead><tbody id="ratings"></tbody></table>
+    </div>
+  </section>
+
+  <section class="grid2">
+    <div class="card">
+      <h2>Operations ledger</h2>
+      <table><thead><tr>
+        <th>Time</th><th>Action</th><th>Symbol</th><th>Qty</th><th>Price</th><th>Value</th><th>Realized</th>
+      </tr></thead><tbody id="trades"></tbody></table>
+    </div>
+    <div class="card">
+      <h2>Activity</h2>
+      <div id="log" class="log"></div>
+    </div>
+  </section>
+</main>
+
+<script>
+const money = n => (n < 0 ? "-$" : "$") + Math.abs(n).toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2});
+const signed = n => (n >= 0 ? "+" : "") + money(n).replace("-", "");
+const cls = n => n > 0 ? "up" : n < 0 ? "down" : "flat";
+const clock = iso => iso ? new Date(iso).toLocaleTimeString() : "—";
+
+function cell(row, text, className) {
+  const td = document.createElement("td");
+  td.textContent = text;
+  if (className) td.className = className;
+  row.appendChild(td);
+  return td;
+}
+
+function tagCell(row, action) {
+  const td = document.createElement("td");
+  const span = document.createElement("span");
+  span.className = "tag " + (["BUY","SELL","HOLD"].includes(action) ? action : "HOLD");
+  span.textContent = action;
+  td.appendChild(span);
+  row.appendChild(td);
+}
+
+function fill(tbody, rows, columns, emptyText) {
+  tbody.replaceChildren();
+  if (!rows.length) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = columns; td.className = "empty"; td.textContent = emptyText;
+    tr.appendChild(td); tbody.appendChild(tr);
+    return;
+  }
+  rows.forEach(build => tbody.appendChild(build()));
+}
+
+function drawChart(points) {
+  const svg = document.getElementById("chart");
+  svg.replaceChildren();
+  if (points.length < 2) return;
+
+  const values = points.map(p => p.equity);
+  const min = Math.min(...values), max = Math.max(...values);
+  const pad = (max - min) * 0.1 || Math.max(1, max * 0.01);
+  const lo = min - pad, hi = max + pad;
+  const x = i => (i / (points.length - 1)) * 1000;
+  const y = v => 210 - ((v - lo) / (hi - lo)) * 200;
+
+  const ns = "http://www.w3.org/2000/svg";
+  const line = values.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+  const rising = values[values.length - 1] >= values[0];
+  const color = rising ? "#3fb950" : "#f85149";
+
+  const area = document.createElementNS(ns, "polygon");
+  area.setAttribute("points", `0,210 ${line} 1000,210`);
+  area.setAttribute("fill", color);
+  area.setAttribute("opacity", "0.12");
+  svg.appendChild(area);
+
+  const path = document.createElementNS(ns, "polyline");
+  path.setAttribute("points", line);
+  path.setAttribute("fill", "none");
+  path.setAttribute("stroke", color);
+  path.setAttribute("stroke-width", "2");
+  path.setAttribute("vector-effect", "non-scaling-stroke");
+  svg.appendChild(path);
+}
+
+function countdown(iso) {
+  if (!iso) return "next run —";
+  const ms = new Date(iso) - new Date();
+  if (ms <= 0) return "next run due";
+  const h = Math.floor(ms / 3600000), m = Math.floor(ms % 3600000 / 60000);
+  return `next run in ${h}h ${String(m).padStart(2, "0")}m`;
+}
+
+let latest = null;
+
+function render(s) {
+  latest = s;
+  const status = document.getElementById("status");
+  status.textContent = s.status;
+  status.className = "badge" + (s.status === "running" ? " running" : "");
+  document.getElementById("cycle").textContent = "cycle " + s.cycle;
+
+  document.getElementById("equity").textContent = money(s.equity);
+  document.getElementById("equitySub").textContent = "start " + money(s.starting_cash);
+
+  const pnl = document.getElementById("pnl");
+  pnl.textContent = signed(s.total_pnl);
+  pnl.className = "value " + cls(s.total_pnl);
+  const pnlSub = document.getElementById("pnlSub");
+  pnlSub.textContent = (s.total_pnl_pct >= 0 ? "+" : "") + s.total_pnl_pct.toFixed(2) + "%";
+  pnlSub.className = "sub " + cls(s.total_pnl);
+
+  const realized = document.getElementById("realized");
+  realized.textContent = signed(s.realized_pnl);
+  realized.className = "value " + cls(s.realized_pnl);
+
+  const unrealized = document.getElementById("unrealized");
+  unrealized.textContent = signed(s.unrealized_pnl);
+  unrealized.className = "value " + cls(s.unrealized_pnl);
+
+  document.getElementById("cash").textContent = money(s.cash);
+  document.getElementById("cashSub").textContent = "invested " + money(s.invested);
+
+  drawChart(s.equity_curve);
+
+  fill(document.getElementById("pool"), s.pool.map(p => () => {
+    const tr = document.createElement("tr");
+    if (!p.held) tr.style.opacity = "0.55";
+    cell(tr, p.symbol);
+    tagCell(tr, p.action);
+    cell(tr, p.held ? p.qty.toFixed(4) : "—");
+    cell(tr, p.held ? money(p.avg_cost) : "—");
+    cell(tr, p.last_price ? money(p.last_price) : "—");
+    cell(tr, p.held ? money(p.market_value) : money(0));
+    cell(tr, p.held ? signed(p.unrealized_pnl) : "—", p.held ? cls(p.unrealized_pnl) : "");
+    cell(tr, p.held ? (p.unrealized_pct >= 0 ? "+" : "") + p.unrealized_pct.toFixed(2) + "%" : "—",
+         p.held ? cls(p.unrealized_pnl) : "");
+    return tr;
+  }), 8, "Pool not loaded");
+
+  fill(document.getElementById("ratings"), s.ratings.map(r => () => {
+    const tr = document.createElement("tr");
+    cell(tr, r.symbol);
+    tagCell(tr, r.action);
+    cell(tr, r.rating || "—");
+    cell(tr, r.price == null ? "—" : money(r.price));
+    return tr;
+  }), 4, "Awaiting first cycle");
+
+  fill(document.getElementById("trades"), s.trades.map(t => () => {
+    const tr = document.createElement("tr");
+    cell(tr, clock(t.timestamp));
+    tagCell(tr, t.action);
+    cell(tr, t.symbol);
+    cell(tr, t.qty.toFixed(4));
+    cell(tr, money(t.price));
+    cell(tr, money(t.value));
+    cell(tr, t.action === "SELL" ? signed(t.realized_pnl) : "—",
+         t.action === "SELL" ? cls(t.realized_pnl) : "");
+    return tr;
+  }), 7, "No operations yet");
+
+  const log = document.getElementById("log");
+  log.replaceChildren();
+  s.events.forEach(e => {
+    const row = document.createElement("div");
+    const ts = document.createElement("span");
+    ts.className = "ts";
+    ts.textContent = clock(e.ts);
+    const msg = document.createElement("span");
+    msg.className = e.level;
+    msg.textContent = e.message;
+    row.append(ts, msg);
+    log.appendChild(row);
+  });
+}
+
+async function poll() {
+  try {
+    const res = await fetch("/api/state", { cache: "no-store" });
+    render(await res.json());
+  } catch {
+    document.getElementById("status").textContent = "disconnected";
+  }
+}
+
+setInterval(poll, 5000);
+setInterval(() => {
+  document.getElementById("next").textContent = countdown(latest && latest.next_cycle_at);
+}, 1000);
+poll();
+</script>
+</body>
+</html>
