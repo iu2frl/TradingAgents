@@ -13,6 +13,38 @@ python -m portfolio_runner.main
 
 Open http://127.0.0.1:8765.
 
+## Docker
+
+The image is `python:3.12-slim` based and builds for **linux/amd64** and
+**linux/arm64**. It starts the loop automatically and publishes the dashboard.
+
+```bash
+docker compose up -d portfolio-runner   # -> http://localhost:8765
+```
+
+Or standalone, from the repository root:
+
+```bash
+docker build -f portfolio_runner/Dockerfile -t tradingagents-portfolio .
+docker run -d --env-file .env -p 8765:8765 tradingagents-portfolio
+```
+
+Multi-arch publish:
+
+```bash
+docker buildx build --platform linux/amd64,linux/arm64 \
+  -f portfolio_runner/Dockerfile -t <registry>/tradingagents-portfolio:latest --push .
+```
+
+Container notes:
+
+- runs as non-root `appuser`, binds `0.0.0.0:8765` inside the container
+- `HEALTHCHECK` polls `/api/state`
+- `docker stop` triggers SIGTERM, which the loop handles for a clean shutdown
+- point `TRADINGAGENTS_LLM_BACKEND_URL` at a reachable host — `localhost`
+  inside the container is the container itself, use `host.docker.internal`
+  (Docker Desktop) or a compose service name
+
 ## Cadence: why decisions are daily, marks are 3h
 
 The agents reason over **daily** data: `propagate()` takes a `YYYY-MM-DD` date,

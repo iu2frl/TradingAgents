@@ -1,4 +1,16 @@
 services:
+  portfolio-runner:
+    build:
+      context: .
+      dockerfile: portfolio_runner/Dockerfile
+    env_file:
+      - .env
+    ports:
+      - "8765:8765"
+    volumes:
+      - tradingagents_data:/home/appuser/.tradingagents
+    restart: unless-stopped
+
   tradingagents:
     build: .
     env_file:
