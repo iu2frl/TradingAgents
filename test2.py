@@ -1,9 +1,10 @@
 import os
 from datetime import date
+
 from dotenv import load_dotenv
 
-from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.default_config import DEFAULT_CONFIG
+from tradingagents.graph.trading_graph import TradingAgentsGraph
 
 load_dotenv()  # Load environment variables from .env file
 

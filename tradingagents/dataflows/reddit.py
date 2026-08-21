@@ -165,7 +165,7 @@ def _get_reddit_access_token() -> str | None:
     if not client_id or not client_secret:
         return None
 
-    auth = base64.b64encode(f"{client_id}:{client_secret}".encode("utf-8")).decode("ascii")
+    auth = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode("ascii")
     data = urlencode({"grant_type": "client_credentials"}).encode("utf-8")
     req = Request(
         "https://www.reddit.com/api/v1/access_token",
