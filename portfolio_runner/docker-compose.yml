@@ -1,0 +1,49 @@
+# Runs the published multi-arch image from GHCR.
+#   docker compose -f portfolio_runner/docker-compose.yml up -d
+# Dashboard: http://localhost:8765
+services:
+  portfolio-runner:
+    image: ${PORTFOLIO_IMAGE:-ghcr.io/iu2frl/tradingagents/portfolio-runner:latest}
+    container_name: portfolio-runner
+    pull_policy: always
+    restart: unless-stopped
+    ports:
+      - "${PORTFOLIO_PUBLISH_PORT:-8765}:8765"
+    volumes:
+      # Agent memory log, decision reports and OHLCV cache.
+      - portfolio_data:/home/appuser/.tradingagents
+    environment:
+      # --- LLM endpoint -------------------------------------------------
+      # Any OpenAI-compatible server. From inside the container, "localhost"
+      # is the container itself: use host.docker.internal or a service name.
+      TRADINGAGENTS_LLM_PROVIDER: ${TRADINGAGENTS_LLM_PROVIDER:-openai_compatible}
+      TRADINGAGENTS_LLM_BACKEND_URL: ${TRADINGAGENTS_LLM_BACKEND_URL:-http://host.docker.internal:8000/v1}
+      TRADINGAGENTS_LLM_MODEL: ${TRADINGAGENTS_LLM_MODEL:-my-model}
+      OPENAI_COMPATIBLE_API_KEY: ${OPENAI_COMPATIBLE_API_KEY:-}
+      TRADINGAGENTS_LLM_MAX_RETRIES: ${TRADINGAGENTS_LLM_MAX_RETRIES:-5}
+
+      # --- Optional data vendors ----------------------------------------
+      ALPHA_VANTAGE_API_KEY: ${ALPHA_VANTAGE_API_KEY:-}
+      FRED_API_KEY: ${FRED_API_KEY:-}
+
+      # --- Portfolio ----------------------------------------------------
+      PORTFOLIO_SYMBOLS: ${PORTFOLIO_SYMBOLS:-AAPL,MSFT,NVDA,AMZN,GOOGL}
+      PORTFOLIO_CASH_BUDGET: ${PORTFOLIO_CASH_BUDGET:-500}
+      PORTFOLIO_BUY_AMOUNT: ${PORTFOLIO_BUY_AMOUNT:-75}
+      PORTFOLIO_MAX_POSITIONS: ${PORTFOLIO_MAX_POSITIONS:-3}
+
+      # --- Scheduling ---------------------------------------------------
+      # Full agent re-analysis; agents reason on daily bars.
+      PORTFOLIO_DECISION_INTERVAL_HOURS: ${PORTFOLIO_DECISION_INTERVAL_HOURS:-24}
+      # Quote/P&L refresh only, no LLM calls.
+      PORTFOLIO_MARK_INTERVAL_HOURS: ${PORTFOLIO_MARK_INTERVAL_HOURS:-3}
+      PORTFOLIO_RETRY_ATTEMPTS: ${PORTFOLIO_RETRY_ATTEMPTS:-3}
+
+      # --- Server (0.0.0.0 is required to reach it from the host) --------
+      PORTFOLIO_HOST: 0.0.0.0
+      PORTFOLIO_PORT: 8765
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  portfolio_data:
