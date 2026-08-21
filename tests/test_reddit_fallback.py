@@ -120,6 +120,28 @@ class TestJsonPathFallsBackToRss:
         rss.assert_called_once()
         assert out and out[0]["source"] == "rss"
 
+    def test_authenticated_json_uses_oauth_headers(self):
+        payload = {"data": {"children": [{"data": {"title": "x", "score": 10, "num_comments": 3, "selftext": "", "created_utc": 123}}]}}
+
+        class _Resp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self):
+                return __import__("json").dumps(payload).encode("utf-8")
+
+        with patch.object(reddit, "_get_reddit_access_token", return_value="abc123"), \
+             patch.object(reddit, "urlopen", return_value=_Resp()) as mocked:
+            out = reddit._fetch_subreddit_json("NVDA", "stocks", 5, 5.0)
+
+        assert out and out[0]["title"] == "x"
+        req = mocked.call_args.args[0]
+        assert req.full_url.startswith("https://oauth.reddit.com/")
+        assert req.headers["Authorization"] == "Bearer abc123"
+
 
 @pytest.mark.unit
 class TestRss429Backoff:
