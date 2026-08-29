@@ -13,49 +13,67 @@
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--text);
          font: 14px/1.5 "Segoe UI", system-ui, sans-serif; }
-  header { display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
-           padding: 16px 24px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header { border-bottom: 1px solid var(--line); background: var(--panel); }
+  /* Shares max-width and padding with main so the two stay aligned. */
+  .bar { display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+         padding: 16px 24px; max-width: 1400px; margin: 0 auto; }
   h1 { font-size: 17px; margin: 0; font-weight: 600; }
-  .badge { padding: 3px 10px; border-radius: 999px; font-size: 12px;
+  .badge { padding: 3px 10px; border-radius: 999px; font-size: 12px; white-space: nowrap;
            border: 1px solid var(--line); color: var(--muted); }
   .badge.running { color: var(--accent); border-color: var(--accent); }
   .spacer { flex: 1; }
   main { padding: 24px; display: grid; gap: 20px; max-width: 1400px; margin: 0 auto; }
   .kpis { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
-  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px;
+          min-width: 0; }
   .card h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .07em;
              color: var(--muted); margin: 0 0 8px; font-weight: 600; }
   .value { font-size: 26px; font-weight: 600; font-variant-numeric: tabular-nums; }
   .sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
   .up { color: var(--up); } .down { color: var(--down); } .flat { color: var(--flat); }
   .grid2 { display: grid; gap: 20px; grid-template-columns: 2fr 1fr; }
-  @media (max-width: 1000px) { .grid2 { grid-template-columns: 1fr; } }
+  .grid2.even { grid-template-columns: 3fr 2fr; }
+  @media (max-width: 1000px) { .grid2, .grid2.even { grid-template-columns: 1fr; } }
+  /* Wide tables scroll inside their card instead of overflowing the page. */
+  .scroll { overflow-x: auto; }
   table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
   th { text-align: right; font-size: 11px; text-transform: uppercase; letter-spacing: .05em;
-       color: var(--muted); padding: 8px; border-bottom: 1px solid var(--line); }
+       color: var(--muted); padding: 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
   th:first-child, td:first-child { text-align: left; }
-  td { padding: 8px; border-bottom: 1px solid rgba(38,48,61,.5); text-align: right; }
+  td { padding: 8px; border-bottom: 1px solid rgba(38,48,61,.5); text-align: right; white-space: nowrap; }
   tbody tr:hover { background: rgba(88,166,255,.06); }
   .tag { font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 600; }
   .tag.BUY { background: rgba(63,185,80,.15); color: var(--up); }
   .tag.SELL { background: rgba(248,81,73,.15); color: var(--down); }
   .tag.HOLD { background: rgba(210,153,34,.15); color: var(--flat); }
-  .log { max-height: 300px; overflow-y: auto; font-family: Consolas, monospace; font-size: 12px; }
-  .log div { padding: 3px 0; border-bottom: 1px solid rgba(38,48,61,.4); }
-  .log .ts { color: var(--muted); margin-right: 8px; }
+  .log-card { display: flex; flex-direction: column; }
+  /* flex:1 + min-height:0 lets the feed grow to match the ledger beside it. */
+  .log { flex: 1; min-height: 320px; max-height: 70vh; overflow-y: auto;
+         font-family: Consolas, monospace; font-size: 12px; }
+  .log div { display: flex; gap: 8px; padding: 3px 0; border-bottom: 1px solid rgba(38,48,61,.4); }
+  .log .ts { color: var(--muted); flex: none; }
   .log .error { color: var(--down); } .log .warn { color: var(--flat); }
   .log .trade { color: var(--accent); }
   .empty { color: var(--muted); padding: 16px 8px; }
   svg { width: 100%; height: 220px; display: block; }
+  @media (max-width: 640px) {
+    .bar { padding: 14px 16px; gap: 10px; }
+    main { padding: 16px; gap: 16px; }
+    .card { padding: 14px; }
+    .value { font-size: 22px; }
+    .spacer { display: none; }
+  }
 </style>
 </head>
 <body>
 <header>
-  <h1>TradingAgents · Research Portfolio</h1>
-  <span id="status" class="badge">connecting…</span>
-  <span id="cycle" class="badge">cycle 0</span>
-  <div class="spacer"></div>
-  <span id="next" class="badge">next run —</span>
+  <div class="bar">
+    <h1>TradingAgents · Research Portfolio</h1>
+    <span id="status" class="badge">connecting…</span>
+    <span id="cycle" class="badge">cycle 0</span>
+    <div class="spacer"></div>
+    <span id="next" class="badge">next run —</span>
+  </div>
 </header>
 
 <main>
@@ -80,27 +98,27 @@
   <section class="grid2">
     <div class="card">
       <h2>Pool</h2>
-      <table><thead><tr>
+      <div class="scroll"><table><thead><tr>
         <th>Symbol</th><th>Signal</th><th>Qty</th><th>Avg cost</th><th>Last</th>
         <th>Value</th><th>P&amp;L</th><th>%</th>
-      </tr></thead><tbody id="pool"></tbody></table>
+      </tr></thead><tbody id="pool"></tbody></table></div>
     </div>
     <div class="card">
       <h2>Latest ratings</h2>
-      <table><thead><tr>
+      <div class="scroll"><table><thead><tr>
         <th>Symbol</th><th>Action</th><th>Rating</th><th>Price</th>
-      </tr></thead><tbody id="ratings"></tbody></table>
+      </tr></thead><tbody id="ratings"></tbody></table></div>
     </div>
   </section>
 
-  <section class="grid2">
+  <section class="grid2 even">
     <div class="card">
       <h2>Operations ledger</h2>
-      <table><thead><tr>
-        <th>Time</th><th>Action</th><th>Symbol</th><th>Qty</th><th>Price</th><th>Value</th><th>Realized</th>
-      </tr></thead><tbody id="trades"></tbody></table>
+      <div class="scroll"><table><thead><tr>
+        <th>When</th><th>Action</th><th>Symbol</th><th>Qty</th><th>Price</th><th>Value</th><th>Realized</th>
+      </tr></thead><tbody id="trades"></tbody></table></div>
     </div>
-    <div class="card">
+    <div class="card log-card">
       <h2>Activity</h2>
       <div id="log" class="log"></div>
     </div>
@@ -111,9 +129,13 @@
 const money = n => (n < 0 ? "-$" : "$") + Math.abs(n).toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2});
 const signed = n => (n >= 0 ? "+" : "") + money(n);
 const cls = n => n > 0 ? "up" : n < 0 ? "down" : "flat";
-const clock = iso => iso ? new Date(iso).toLocaleString(undefined, {
-  month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit"
-}) : "—";
+const pad = n => String(n).padStart(2, "0");
+const clock = iso => {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return `${pad(d.getFullYear() % 100)}${pad(d.getMonth() + 1)}${pad(d.getDate())}`
+       + `-${pad(d.getHours())}${pad(d.getMinutes())}`;
+};
 
 function cell(row, text, className) {
   const td = document.createElement("td");
