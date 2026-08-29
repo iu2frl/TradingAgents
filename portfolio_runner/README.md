@@ -56,11 +56,19 @@ So the loop is split:
 
 | Pass | Default | Cost | What it does |
 |---|---|---|---|
-| Decision | 24h | full agent graph per symbol | re-rates the pool, buys/sells |
+| Decision | 16:30 America/New_York | full agent graph per symbol | re-rates the pool, buys/sells |
 | Mark | 3h | quotes only, no LLM | refreshes prices, P&L, equity curve |
 
-Set `PORTFOLIO_DECISION_INTERVAL_HOURS=3` if you explicitly want the research
-signal re-sampled every 3 hours.
+The decision pass is anchored to a fixed wall-clock time (`PORTFOLIO_DECISION_AT`,
+`PORTFOLIO_DECISION_TZ`) shortly after the US close, so the session being analysed
+is always complete. `trade_date` is not the calendar date: it is the date of the
+last **finished** daily bar, and orders fill at that bar's close, so the price the
+portfolio pays is the price the agents reasoned about.
+
+Weekends and holidays need no calendar: a non-trading day produces no bar, so the
+session date does not advance and the cycle is skipped with
+`No session after <date>, decisions skipped`. If the runner is offline for a
+while it resumes at the latest session rather than replaying the gap.
 
 ## Resilience
 

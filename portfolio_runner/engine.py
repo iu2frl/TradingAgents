@@ -13,7 +13,10 @@ import os
 import random
 import time
 from collections.abc import Callable
+from datetime import datetime
+from datetime import time as clock_time
 from typing import TypeVar
+from zoneinfo import ZoneInfo
 
 import yfinance as yf
 
@@ -26,6 +29,9 @@ T = TypeVar("T")
 
 BUY_RATINGS = {"buy", "overweight"}
 SELL_RATINGS = {"sell", "underweight"}
+
+MARKET_TZ = ZoneInfo("America/New_York")
+MARKET_CLOSE = clock_time(16, 0)
 
 
 class RetryError(RuntimeError):
@@ -126,6 +132,63 @@ class TradingEngine:
             on_error=lambda n, e: self.store.log("warn", f"{symbol}: quote attempt {n} failed: {e}"),
         )
 
+    # -------------------------------------------------------------- sessions
+    @staticmethod
+    def _completed_sessions(symbol: str) -> list[tuple[str, float]]:
+        """Daily closes for sessions that have finished, oldest first.
+
+        A day with no bar is a weekend or a holiday, so the bars themselves act
+        as the exchange calendar and no separate calendar dependency is needed.
+        """
+        history = yf.Ticker(symbol).history(period="1mo", interval="1d")
+        if history.empty:
+            raise ValueError(f"no daily bars for {symbol}")
+
+        now = datetime.now(MARKET_TZ)
+        sessions: list[tuple[str, float]] = []
+        for stamp, close in zip(history.index, history["Close"], strict=False):
+            day = stamp.date()
+            if day > now.date() or (day == now.date() and now.time() < MARKET_CLOSE):
+                continue  # session still in progress
+            price = float(close)
+            if price > 0:
+                sessions.append((day.isoformat(), price))
+        return sessions
+
+    def last_session(self) -> str:
+        """Date of the most recent finished trading session, as YYYY-MM-DD."""
+
+        def _run() -> str:
+            sessions = self._completed_sessions(self.symbols[0])
+            if not sessions:
+                raise ValueError(f"no completed session for {self.symbols[0]}")
+            return sessions[-1][0]
+
+        return retry(
+            _run,
+            attempts=self.attempts,
+            base_delay=1.0,
+            label="session date",
+            on_error=lambda n, e: self.store.log("warn", f"session lookup attempt {n} failed: {e}"),
+        )
+
+    def close_on(self, symbol: str, session: str) -> float:
+        """Official close for ``session``, so the fill matches the analysed bar."""
+
+        def _run() -> float:
+            for day, price in self._completed_sessions(symbol):
+                if day == session:
+                    return price
+            raise ValueError(f"no {session} close for {symbol}")
+
+        return retry(
+            _run,
+            attempts=self.attempts,
+            base_delay=1.0,
+            label=f"close {symbol}",
+            on_error=lambda n, e: self.store.log("warn", f"{symbol}: close attempt {n} failed: {e}"),
+        )
+
     # -------------------------------------------------------------- decision
     def rating_of(self, symbol: str, trade_date: str) -> str:
         def _run() -> str:
@@ -164,7 +227,7 @@ class TradingEngine:
 
     def run_cycle(self, trade_date: str) -> None:
         cycle = self.store.start_cycle()
-        self.store.log("info", f"Cycle {cycle} started for {trade_date}")
+        self.store.log("info", f"Cycle {cycle} started for session {trade_date}")
         self.refresh_prices()
 
         for symbol in self.symbols:
@@ -177,9 +240,11 @@ class TradingEngine:
             action = self.action_for(rating)
 
             try:
-                price = self.price_of(symbol)
+                price = self.close_on(symbol, trade_date)
             except RetryError as exc:
-                self.store.log("error", f"{symbol}: no price, decision not executed — {exc}")
+                self.store.log(
+                    "error", f"{symbol}: no {trade_date} close, decision not executed — {exc}"
+                )
                 self.store.record_rating(symbol, action, rating, None)
                 continue
 

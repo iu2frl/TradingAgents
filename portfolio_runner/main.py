@@ -10,11 +10,12 @@ import os
 import signal
 import threading
 import traceback
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from dotenv import load_dotenv
 
-from .engine import TradingEngine
+from .engine import RetryError, TradingEngine
 from .server import start_server
 from .store import PortfolioStore
 
@@ -37,6 +38,32 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _env_time(name: str, default: str) -> time:
+    raw = str(os.getenv(name, default))
+    try:
+        hour, minute = (int(part) for part in raw.split(":", 1))
+        return time(hour, minute)
+    except ValueError:
+        hour, minute = (int(part) for part in default.split(":", 1))
+        return time(hour, minute)
+
+
+def _env_zone(name: str, default: str) -> ZoneInfo:
+    try:
+        return ZoneInfo(str(os.getenv(name, default)))
+    except (ZoneInfoNotFoundError, ValueError):
+        return ZoneInfo(default)
+
+
+def _next_decision(after: datetime, at: time, zone: ZoneInfo) -> datetime:
+    """Next occurrence of ``at`` in ``zone``, strictly after ``after``."""
+    local = after.astimezone(zone)
+    target = local.replace(hour=at.hour, minute=at.minute, second=0, microsecond=0)
+    if target <= local:
+        target += timedelta(days=1)
+    return target.astimezone(timezone.utc)
+
+
 def main() -> None:
     symbols = [
         s.strip().upper()
@@ -44,7 +71,8 @@ def main() -> None:
         if s.strip()
     ]
     # Decisions follow the daily bars the agents reason over; marks only refresh P&L.
-    decision_every = timedelta(hours=_env_float("PORTFOLIO_DECISION_INTERVAL_HOURS", 24.0))
+    decision_at = _env_time("PORTFOLIO_DECISION_AT", "16:30")
+    decision_zone = _env_zone("PORTFOLIO_DECISION_TZ", "America/New_York")
     mark_every = timedelta(hours=_env_float("PORTFOLIO_MARK_INTERVAL_HOURS", 3.0))
     host = os.getenv("PORTFOLIO_HOST", "127.0.0.1")
     port = _env_int("PORTFOLIO_PORT", 8765)
@@ -64,28 +92,46 @@ def main() -> None:
     store.log("info", f"Dashboard on http://{host}:{port} · pool: {', '.join(symbols)}")
     print(f"Dashboard: http://{host}:{port}")
     print(f"Pool: {', '.join(symbols)}")
-    print(f"Decisions every {decision_every} · marks every {mark_every}")
+    print(
+        f"Decisions at {decision_at:%H:%M} {decision_zone.key} · marks every {mark_every}"
+    )
 
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, lambda *_: _shutdown.set())
 
     next_decision = datetime.now(timezone.utc)
+    last_session: str | None = None
     while not _shutdown.is_set():
         now = datetime.now(timezone.utc)
         try:
             if now >= next_decision:
-                engine.run_cycle(date.today().strftime("%Y-%m-%d"))
-                next_decision = datetime.now(timezone.utc) + decision_every
+                session = engine.last_session()
+                if session == last_session:
+                    store.log("info", f"No session after {session}, decisions skipped")
+                else:
+                    engine.run_cycle(session)
+                    last_session = session
+                next_decision = _next_decision(
+                    datetime.now(timezone.utc), decision_at, decision_zone
+                )
                 store.set_next_run(next_decision)
             else:
                 engine.refresh_prices()
                 store.mark_only()
+        except RetryError as exc:
+            # Leave next_decision alone so the pass is retried on the next tick.
+            store.set_status("idle")
+            store.log("warn", f"Session lookup failed, retrying later: {exc}")
         except Exception as exc:  # a failed pass must never kill the runner
             store.set_status("idle")
             store.log("error", f"Pass aborted: {exc}")
             traceback.print_exc()
 
-        _shutdown.wait(mark_every.total_seconds())
+        wait = mark_every.total_seconds()
+        remaining = (next_decision - datetime.now(timezone.utc)).total_seconds()
+        if 0 < remaining < wait:
+            wait = remaining
+        _shutdown.wait(max(wait, 1.0))
 
     store.log("info", "Shutting down")
     server.shutdown()

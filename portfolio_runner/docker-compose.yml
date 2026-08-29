@@ -35,8 +35,10 @@ services:
       PORTFOLIO_MAX_SYMBOL_COST: ${PORTFOLIO_MAX_SYMBOL_COST:-150}
 
       # --- Scheduling ---------------------------------------------------
-      # Full agent re-analysis; agents reason on daily bars.
-      PORTFOLIO_DECISION_INTERVAL_HOURS: ${PORTFOLIO_DECISION_INTERVAL_HOURS:-24}
+      # Full agent re-analysis, anchored after the US close so the last daily
+      # bar is final. Weekends and holidays are skipped: no new bar, no cycle.
+      PORTFOLIO_DECISION_AT: ${PORTFOLIO_DECISION_AT:-16:30}
+      PORTFOLIO_DECISION_TZ: ${PORTFOLIO_DECISION_TZ:-America/New_York}
       # Quote/P&L refresh only, no LLM calls.
       PORTFOLIO_MARK_INTERVAL_HOURS: ${PORTFOLIO_MARK_INTERVAL_HOURS:-3}
       PORTFOLIO_RETRY_ATTEMPTS: ${PORTFOLIO_RETRY_ATTEMPTS:-3}
