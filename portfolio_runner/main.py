@@ -56,6 +56,7 @@ def main() -> None:
         symbols,
         buy_amount=_env_float("PORTFOLIO_BUY_AMOUNT", 75.0),
         max_positions=_env_int("PORTFOLIO_MAX_POSITIONS", 3),
+        max_symbol_cost=_env_float("PORTFOLIO_MAX_SYMBOL_COST", 150.0),
         attempts=_env_int("PORTFOLIO_RETRY_ATTEMPTS", 3),
     )
 

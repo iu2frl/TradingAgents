@@ -31,6 +31,8 @@ services:
       PORTFOLIO_CASH_BUDGET: ${PORTFOLIO_CASH_BUDGET:-500}
       PORTFOLIO_BUY_AMOUNT: ${PORTFOLIO_BUY_AMOUNT:-75}
       PORTFOLIO_MAX_POSITIONS: ${PORTFOLIO_MAX_POSITIONS:-3}
+      # Cap on cost basis per symbol, so a held name is not topped up every cycle.
+      PORTFOLIO_MAX_SYMBOL_COST: ${PORTFOLIO_MAX_SYMBOL_COST:-150}
 
       # --- Scheduling ---------------------------------------------------
       # Full agent re-analysis; agents reason on daily bars.

@@ -65,12 +65,14 @@ class TradingEngine:
         *,
         buy_amount: float = 75.0,
         max_positions: int = 3,
+        max_symbol_cost: float = 150.0,
         attempts: int = 3,
     ):
         self.store = store
         self.symbols = symbols
         self.buy_amount = buy_amount
         self.max_positions = max_positions
+        self.max_symbol_cost = max_symbol_cost
         self.attempts = attempts
         self._graph: TradingAgentsGraph | None = None
 
@@ -195,7 +197,12 @@ class TradingEngine:
             if not held and len(self.store.positions) >= self.max_positions:
                 self.store.log("info", f"{symbol}: BUY skipped, position limit reached")
                 return
-            trade = self.store.buy(symbol, price, self.buy_amount, rating)
+            position = self.store.positions.get(symbol)
+            room = self.max_symbol_cost - (position.cost_basis if position else 0.0)
+            if room <= 0:
+                self.store.log("info", f"{symbol}: BUY skipped, symbol exposure limit reached")
+                return
+            trade = self.store.buy(symbol, price, min(self.buy_amount, room), rating)
             if trade is None:
                 self.store.log("info", f"{symbol}: BUY skipped, insufficient cash")
             else:
