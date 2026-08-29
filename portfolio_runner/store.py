@@ -1,17 +1,23 @@
-"""Thread-safe in-memory portfolio database.
+"""Thread-safe portfolio database, persisted to a JSON file.
 
-Everything lives in process memory: positions, the full operation ledger, the
-equity curve and the activity log. The engine writes to it from the worker
-thread while the HTTP server reads snapshots for the UI, so every public method
-is guarded by a single re-entrant lock.
+Positions, the operation ledger, the equity curve and the activity log live in
+process memory; the engine writes to them from the worker thread while the HTTP
+server reads snapshots for the UI, so every public method is guarded by a single
+re-entrant lock. Mutations that matter are flushed to ``state_file`` so a restart
+or an image update does not lose the running book.
 """
 
 from __future__ import annotations
 
+import json
+import os
 import threading
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
+
+STATE_VERSION = 1
 
 
 def _now() -> str:
@@ -57,12 +63,14 @@ class Trade:
 @dataclass
 class PortfolioStore:
     starting_cash: float = 500.0
+    state_file: Path | None = None
     cash: float = field(init=False)
     pool: list[str] = field(default_factory=list)
     positions: dict[str, Position] = field(default_factory=dict)
     trades: list[Trade] = field(default_factory=list)
     realized_pnl: float = 0.0
     cycle: int = 0
+    last_session: str | None = None
     last_cycle_started: str | None = None
     last_cycle_finished: str | None = None
     next_cycle_at: str | None = None
@@ -80,6 +88,112 @@ class PortfolioStore:
     def set_pool(self, symbols: list[str]) -> None:
         with self._lock:
             self.pool = list(symbols)
+
+    def set_last_session(self, session: str) -> None:
+        with self._lock:
+            self.last_session = session
+            self._save()
+
+    # ---------------------------------------------------------- persistence
+    def _state(self) -> dict:
+        return {
+            "version": STATE_VERSION,
+            "starting_cash": self.starting_cash,
+            "cash": self.cash,
+            "realized_pnl": self.realized_pnl,
+            "cycle": self.cycle,
+            "last_session": self.last_session,
+            "last_cycle_started": self.last_cycle_started,
+            "last_cycle_finished": self.last_cycle_finished,
+            "next_cycle_at": self.next_cycle_at,
+            "positions": [asdict(p) for p in self.positions.values()],
+            "trades": [asdict(t) for t in self.trades],
+            "ratings": list(self._ratings.values()),
+            "last_prices": dict(self._last_prices),
+            "equity_curve": list(self._equity_curve),
+            "events": list(self._events),
+        }
+
+    def _save(self) -> None:
+        """Flush state via a temp file + rename, so a crash cannot truncate it."""
+        if self.state_file is None:
+            return
+        try:
+            self.state_file.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.state_file.with_name(self.state_file.name + ".tmp")
+            tmp.write_text(json.dumps(self._state()), encoding="utf-8")
+            os.replace(tmp, self.state_file)
+        except OSError as exc:
+            self.log("warn", f"State not saved: {exc}")
+
+    def restore(self, payload: dict) -> None:
+        """Adopt a saved state file or a live ``/api/state`` snapshot."""
+        with self._lock:
+            self.starting_cash = float(payload.get("starting_cash", self.starting_cash))
+            self.cash = float(payload.get("cash", self.starting_cash))
+            self.realized_pnl = float(payload.get("realized_pnl", 0.0))
+            self.cycle = int(payload.get("cycle", 0))
+            self.last_session = payload.get("last_session")
+            self.last_cycle_started = payload.get("last_cycle_started")
+            self.last_cycle_finished = payload.get("last_cycle_finished")
+            self.next_cycle_at = payload.get("next_cycle_at")
+            self.status = "idle"
+
+            self.positions = {
+                str(raw["symbol"]): Position(
+                    str(raw["symbol"]),
+                    float(raw.get("qty", 0.0)),
+                    float(raw.get("avg_cost", 0.0)),
+                    float(raw.get("last_price", 0.0)),
+                )
+                for raw in payload.get("positions", [])
+                if raw.get("symbol") and float(raw.get("qty", 0.0)) > 0
+            }
+
+            self.trades = [
+                Trade(
+                    str(raw.get("timestamp", "")),
+                    str(raw.get("action", "")),
+                    str(raw.get("symbol", "")),
+                    float(raw.get("qty", 0.0)),
+                    float(raw.get("price", 0.0)),
+                    float(raw.get("value", 0.0)),
+                    float(raw.get("realized_pnl", 0.0)),
+                    str(raw.get("rating", "")),
+                )
+                for raw in payload.get("trades", [])
+            ]
+
+            self._ratings = {
+                str(raw["symbol"]): dict(raw)
+                for raw in payload.get("ratings", [])
+                if raw.get("symbol")
+            }
+            self._last_prices = {
+                str(k): float(v) for k, v in payload.get("last_prices", {}).items()
+            }
+            # A live snapshot has no last_prices map; recover marks from the pool rows.
+            for row in payload.get("pool", []):
+                if isinstance(row, dict) and row.get("symbol") and row.get("last_price"):
+                    self._last_prices.setdefault(str(row["symbol"]), float(row["last_price"]))
+
+            self._equity_curve = [dict(point) for point in payload.get("equity_curve", [])]
+            self._events = deque(payload.get("events", []), maxlen=300)
+
+    def restore_file(self) -> bool:
+        """Load ``state_file`` if present; a bad file is logged, never fatal."""
+        if self.state_file is None or not self.state_file.exists():
+            return False
+        try:
+            payload = json.loads(self.state_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            self.log("warn", f"State file unreadable, starting fresh: {exc}")
+            return False
+        if not isinstance(payload, dict):
+            self.log("warn", "State file malformed, starting fresh")
+            return False
+        self.restore(payload)
+        return True
 
     # ------------------------------------------------------------------ log
     def log(self, level: str, message: str) -> None:
@@ -99,6 +213,7 @@ class PortfolioStore:
             self.cycle += 1
             self.last_cycle_started = _now()
             self.status = "running"
+            self._save()
             return self.cycle
 
     def finish_cycle(self) -> None:
@@ -106,11 +221,13 @@ class PortfolioStore:
             self.last_cycle_finished = _now()
             self.status = "idle"
             self._record_equity()
+            self._save()
 
     def mark_only(self) -> None:
         """Record an equity point from a price refresh, without a decision pass."""
         with self._lock:
             self._record_equity()
+            self._save()
 
     # --------------------------------------------------------------- prices
     def mark_price(self, symbol: str, price: float) -> None:
@@ -131,6 +248,7 @@ class PortfolioStore:
                 "price": price,
                 "ts": _now(),
             }
+            self._save()
 
     # ---------------------------------------------------------------- trades
     def buy(self, symbol: str, price: float, cash_amount: float, rating: str = "") -> Trade | None:
@@ -158,6 +276,7 @@ class PortfolioStore:
             trade = Trade(_now(), "BUY", symbol, qty, price, spend, 0.0, rating)
             self.trades.insert(0, trade)
             self._record_equity()
+            self._save()
             return trade
 
     def sell(self, symbol: str, price: float, rating: str = "") -> Trade | None:
@@ -178,6 +297,7 @@ class PortfolioStore:
             trade = Trade(_now(), "SELL", symbol, qty, price, proceeds, realized, rating)
             self.trades.insert(0, trade)
             self._record_equity()
+            self._save()
             return trade
 
     # -------------------------------------------------------------- metrics

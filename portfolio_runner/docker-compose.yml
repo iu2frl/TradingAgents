@@ -5,12 +5,13 @@ services:
   portfolio-runner:
     image: ${PORTFOLIO_IMAGE:-ghcr.io/iu2frl/tradingagents/portfolio-runner:latest}
     container_name: portfolio-runner
-    pull_policy: always
+    # Set to "never" when running a locally built image.
+    pull_policy: ${PORTFOLIO_PULL_POLICY:-always}
     restart: unless-stopped
     ports:
       - "${PORTFOLIO_PUBLISH_PORT:-8765}:8765"
     volumes:
-      # Agent memory log, decision reports and OHLCV cache.
+      # Agent memory log, decision reports, OHLCV cache and the portfolio state.
       - portfolio_data:/home/appuser/.tradingagents
     environment:
       # --- LLM endpoint -------------------------------------------------
@@ -33,6 +34,9 @@ services:
       PORTFOLIO_MAX_POSITIONS: ${PORTFOLIO_MAX_POSITIONS:-3}
       # Cap on cost basis per symbol, so a held name is not topped up every cycle.
       PORTFOLIO_MAX_SYMBOL_COST: ${PORTFOLIO_MAX_SYMBOL_COST:-150}
+
+      # Book, ledger and equity curve survive restarts here (inside the volume).
+      PORTFOLIO_STATE_FILE: ${PORTFOLIO_STATE_FILE:-/home/appuser/.tradingagents/portfolio_state.json}
 
       # --- Scheduling ---------------------------------------------------
       # Full agent re-analysis, anchored after the US close so the last daily

@@ -11,6 +11,7 @@ import signal
 import threading
 import traceback
 from datetime import datetime, time, timedelta, timezone
+from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from dotenv import load_dotenv
@@ -77,7 +78,21 @@ def main() -> None:
     host = os.getenv("PORTFOLIO_HOST", "127.0.0.1")
     port = _env_int("PORTFOLIO_PORT", 8765)
 
-    store = PortfolioStore(starting_cash=_env_float("PORTFOLIO_CASH_BUDGET", 500.0))
+    store = PortfolioStore(
+        starting_cash=_env_float("PORTFOLIO_CASH_BUDGET", 500.0),
+        state_file=Path(
+            os.getenv(
+                "PORTFOLIO_STATE_FILE",
+                str(Path.home() / ".tradingagents" / "portfolio_state.json"),
+            )
+        ),
+    )
+    if store.restore_file():
+        store.log(
+            "info",
+            f"Restored cycle {store.cycle}, {len(store.trades)} operations, "
+            f"{len(store.positions)} open positions",
+        )
     store.set_pool(symbols)
     engine = TradingEngine(
         store,
@@ -100,17 +115,16 @@ def main() -> None:
         signal.signal(sig, lambda *_: _shutdown.set())
 
     next_decision = datetime.now(timezone.utc)
-    last_session: str | None = None
     while not _shutdown.is_set():
         now = datetime.now(timezone.utc)
         try:
             if now >= next_decision:
                 session = engine.last_session()
-                if session == last_session:
+                if session == store.last_session:
                     store.log("info", f"No session after {session}, decisions skipped")
                 else:
                     engine.run_cycle(session)
-                    last_session = session
+                    store.set_last_session(session)
                 next_decision = _next_decision(
                     datetime.now(timezone.utc), decision_at, decision_zone
                 )

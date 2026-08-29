@@ -70,6 +70,29 @@ session date does not advance and the cycle is skipped with
 `No session after <date>, decisions skipped`. If the runner is offline for a
 while it resumes at the latest session rather than replaying the gap.
 
+## State and restarts
+
+The book is persisted to `PORTFOLIO_STATE_FILE`
+(default `~/.tradingagents/portfolio_state.json`, inside the mounted volume) after
+every trade, rating and cycle boundary. Writes go to a temp file and are renamed
+into place, so a crash mid-write cannot truncate it. On startup the runner adopts
+the file if present: positions, ledger, realized P&L, cycle number, equity curve
+and the last processed session all survive a restart or an image update.
+
+`starting_cash` comes from the state file when one exists, so the P&L baseline is
+never reset by a changed `PORTFOLIO_CASH_BUDGET`. Restoring `last_session` also
+prevents a restart from re-trading a session that was already executed.
+
+`restore()` accepts either a saved state file or a raw `/api/state` response, so a
+running instance can be migrated by saving its own dashboard payload:
+
+```bash
+curl -s http://localhost:8765/api/state > portfolio_state.json
+# stop the container, copy the file into the volume as portfolio_state.json, restart
+```
+
+Delete the file to start a fresh book.
+
 ## Resilience
 
 LLM endpoints and data vendors fail routinely, so:

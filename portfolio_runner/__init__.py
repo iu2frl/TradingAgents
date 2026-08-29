@@ -1,1 +1,1 @@
-"""In-memory paper-trading research runner built on TradingAgents."""
+"""Paper-trading research runner built on TradingAgents."""
