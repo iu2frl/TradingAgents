@@ -65,6 +65,37 @@ def _next_decision(after: datetime, at: time, zone: ZoneInfo) -> datetime:
     return target.astimezone(timezone.utc)
 
 
+def _previous_decision(before: datetime, at: time, zone: ZoneInfo) -> datetime:
+    """Most recent occurrence of ``at`` in ``zone``, at or before ``before``."""
+    local = before.astimezone(zone)
+    target = local.replace(hour=at.hour, minute=at.minute, second=0, microsecond=0)
+    if target > local:
+        target -= timedelta(days=1)
+    return target.astimezone(timezone.utc)
+
+
+def _parse_utc(stamp: str | None) -> datetime | None:
+    if not stamp:
+        return None
+    try:
+        parsed = datetime.fromisoformat(stamp)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def _resume_schedule(
+    last_finished: str | None, now: datetime, at: time, zone: ZoneInfo
+) -> datetime:
+    """Due slot after a restart: now, unless the pending slot already ran."""
+    finished = _parse_utc(last_finished)
+    if finished is None:
+        return now
+    if finished >= _previous_decision(now, at, zone):
+        return _next_decision(now, at, zone)
+    return now
+
+
 def main() -> None:
     symbols = [
         s.strip().upper()
@@ -114,7 +145,17 @@ def main() -> None:
     for sig in (signal.SIGINT, signal.SIGTERM):
         signal.signal(sig, lambda *_: _shutdown.set())
 
-    next_decision = datetime.now(timezone.utc)
+    next_decision = _resume_schedule(
+        store.last_cycle_finished, datetime.now(timezone.utc), decision_at, decision_zone
+    )
+    store.set_next_run(next_decision)
+    if next_decision > datetime.now(timezone.utc):
+        store.log(
+            "info",
+            f"Last cycle already covered the current slot, next decision at "
+            f"{next_decision.astimezone(decision_zone):%Y-%m-%d %H:%M} {decision_zone.key}",
+        )
+
     while not _shutdown.is_set():
         now = datetime.now(timezone.utc)
         try:
