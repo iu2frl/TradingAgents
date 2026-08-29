@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 STATE_VERSION = 1
+DAILY_HISTORY_DAYS = 90
 
 
 def _now() -> str:
@@ -80,6 +81,7 @@ class PortfolioStore:
         self.cash = float(self.starting_cash)
         self._lock = threading.RLock()
         self._equity_curve: list[dict] = []
+        self._daily: dict[str, dict] = {}
         self._events: deque[dict] = deque(maxlen=300)
         self._ratings: dict[str, dict] = {}
         self._last_prices: dict[str, float] = {}
@@ -111,6 +113,7 @@ class PortfolioStore:
             "ratings": list(self._ratings.values()),
             "last_prices": dict(self._last_prices),
             "equity_curve": list(self._equity_curve),
+            "daily": self._daily_rows(),
             "events": list(self._events),
         }
 
@@ -178,6 +181,16 @@ class PortfolioStore:
                     self._last_prices.setdefault(str(row["symbol"]), float(row["last_price"]))
 
             self._equity_curve = [dict(point) for point in payload.get("equity_curve", [])]
+            self._daily = {
+                str(row["date"]): {
+                    "date": str(row["date"]),
+                    "equity": float(row.get("equity", 0.0)),
+                    "cash": float(row.get("cash", 0.0)),
+                    "holdings": {str(k): float(v) for k, v in row.get("holdings", {}).items()},
+                }
+                for row in payload.get("daily", [])
+                if row.get("date")
+            }
             self._events = deque(payload.get("events", []), maxlen=300)
 
     def restore_file(self) -> bool:
@@ -305,6 +318,7 @@ class PortfolioStore:
         return self.cash + sum(p.market_value for p in self.positions.values())
 
     def _record_equity(self) -> None:
+        self._record_daily()
         point = {"ts": _now(), "equity": round(self._equity(), 2)}
         if self._equity_curve and self._equity_curve[-1]["equity"] == point["equity"]:
             self._equity_curve[-1] = point
@@ -312,6 +326,25 @@ class PortfolioStore:
         self._equity_curve.append(point)
         if len(self._equity_curve) > 500:
             del self._equity_curve[0]
+
+    def _record_daily(self) -> None:
+        """One row per calendar day, rewritten as the day progresses."""
+        day = _now()[:10]
+        self._daily[day] = {
+            "date": day,
+            "equity": round(self._equity(), 2),
+            "cash": round(self.cash, 2),
+            "holdings": {
+                p.symbol: round(p.market_value, 2)
+                for p in self.positions.values()
+                if p.qty > 0
+            },
+        }
+        for stale in sorted(self._daily)[:-DAILY_HISTORY_DAYS]:
+            del self._daily[stale]
+
+    def _daily_rows(self) -> list[dict]:
+        return [self._daily[day] for day in sorted(self._daily)]
 
     def snapshot(self) -> dict:
         """Immutable view of the whole portfolio, ready for JSON serialization."""
@@ -353,6 +386,7 @@ class PortfolioStore:
                 "trades": [t.__dict__ for t in self.trades[:100]],
                 "trade_count": len(self.trades),
                 "equity_curve": list(self._equity_curve),
+                "daily": self._daily_rows(),
                 "events": list(self._events)[:80],
             }
 

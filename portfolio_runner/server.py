@@ -14,18 +14,21 @@ from pathlib import Path
 
 from .store import PortfolioStore
 
-_INDEX = Path(__file__).with_name("static") / "index.html"
+_STATIC = Path(__file__).with_name("static")
+_INDEX = _STATIC / "index.html"
+_ECHARTS = _STATIC / "echarts.min.js"
 
 
 def _make_handler(store: PortfolioStore) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
-        def _send(self, status: int, body: bytes, content_type: str) -> None:
+        def _send(self, status: int, body: bytes, content_type: str,
+                  cache: str = "no-store") -> None:
             self.send_response(status)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-store")
+            self.send_header("Cache-Control", cache)
             self.send_header("X-Content-Type-Options", "nosniff")
             self.end_headers()
             self.wfile.write(body)
@@ -40,6 +43,14 @@ def _make_handler(store: PortfolioStore) -> type[BaseHTTPRequestHandler]:
                     self._send(500, b"dashboard asset missing", "text/plain; charset=utf-8")
                     return
                 self._send(200, body, "text/html; charset=utf-8")
+            elif route == "/echarts.min.js":
+                try:
+                    body = _ECHARTS.read_bytes()
+                except OSError:
+                    self._send(500, b"chart asset missing", "text/plain; charset=utf-8")
+                    return
+                self._send(200, body, "text/javascript; charset=utf-8",
+                           cache="public, max-age=604800, immutable")
             elif route == "/api/state":
                 payload = json.dumps(store.snapshot()).encode("utf-8")
                 self._send(200, payload, "application/json; charset=utf-8")
