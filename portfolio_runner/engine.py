@@ -13,8 +13,7 @@ import os
 import random
 import time
 from collections.abc import Callable
-from datetime import datetime
-from datetime import time as clock_time
+from datetime import datetime, time as clock_time
 from typing import TypeVar
 from zoneinfo import ZoneInfo
 
