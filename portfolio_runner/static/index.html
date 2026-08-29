@@ -311,6 +311,14 @@ function countdown(iso) {
 }
 
 let latest = null;
+const chartSignatures = {};
+
+function redrawIfChanged(key, data, draw) {
+  const signature = JSON.stringify(data);
+  if (chartSignatures[key] === signature) return;
+  chartSignatures[key] = signature;
+  draw();
+}
 
 function render(s) {
   latest = s;
@@ -340,8 +348,10 @@ function render(s) {
   document.getElementById("cash").textContent = money(s.cash);
   document.getElementById("cashSub").textContent = "invested " + money(s.invested);
 
-  drawEquity(s.equity_curve || [], s.starting_cash);
-  drawAllocation(s.daily || []);
+  // Chart data only moves on a mark or a decision cycle, so skip the rebuild otherwise.
+  redrawIfChanged("equity", [s.equity_curve || [], s.starting_cash],
+                  () => drawEquity(s.equity_curve || [], s.starting_cash));
+  redrawIfChanged("alloc", s.daily || [], () => drawAllocation(s.daily || []));
 
   fill(document.getElementById("pool"), s.pool.map(p => () => {
     const tr = document.createElement("tr");
@@ -405,7 +415,7 @@ async function poll() {
 }
 
 initCharts();
-setInterval(poll, 5000);
+setInterval(poll, 30000);
 setInterval(() => {
   document.getElementById("next").textContent = countdown(latest && latest.next_cycle_at);
 }, 1000);
