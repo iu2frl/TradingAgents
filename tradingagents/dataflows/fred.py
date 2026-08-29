@@ -154,7 +154,15 @@ def get_macro_data(
     if look_back_days is None:
         look_back_days = DEFAULT_LOOKBACK_DAYS
 
-    end_dt = datetime.strptime(curr_date, "%Y-%m-%d")
+    # curr_date is LLM-supplied and models routinely abbreviate it ("2026-08").
+    # Guessing a day would risk look-ahead, so ask for a full date instead.
+    try:
+        end_dt = datetime.strptime(curr_date, "%Y-%m-%d")
+    except (TypeError, ValueError):
+        return (
+            f"FRED: '{curr_date}' is not a valid date. Pass curr_date as "
+            f"yyyy-mm-dd, e.g. '2026-08-29'."
+        )
     start_date = (end_dt - timedelta(days=look_back_days)).strftime("%Y-%m-%d")
 
     # Invalid LLM-supplied indicator: return guidance rather than raising, so a

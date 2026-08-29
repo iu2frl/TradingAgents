@@ -181,7 +181,10 @@ def load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
     # re-fetch rather than serving the poisoned file forever.
     data = None
     if os.path.exists(data_file):
-        cached = pd.read_csv(data_file, on_bad_lines="skip", encoding="utf-8")
+        try:
+            cached = pd.read_csv(data_file, on_bad_lines="skip", encoding="utf-8")
+        except pd.errors.EmptyDataError:
+            cached = pd.DataFrame()  # zero-byte file: read_csv raises before the checks below
         # Serve the cache only when it is usable and not a stale snapshot of the
         # day being requested (#1150); otherwise fall through and refetch.
         if (
