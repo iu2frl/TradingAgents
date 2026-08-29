@@ -4,6 +4,7 @@ path's degradation (#862), and chunked-transfer error handling (#1024)."""
 from __future__ import annotations
 
 import http.client
+import os
 from unittest.mock import patch
 from urllib.error import HTTPError
 
@@ -92,17 +93,32 @@ class TestRssParsing:
 
 @pytest.mark.unit
 class TestFetchSubredditIsRssFirst:
-    """The default per-subreddit fetch goes straight to RSS — it must not hit
-    the WAF-blocked JSON endpoint, which only burned rate-limit budget."""
+    """Without credentials the per-subreddit fetch goes straight to RSS — it must
+    not hit the WAF-blocked JSON endpoint, which only burned rate-limit budget."""
 
     def test_delegates_to_rss_without_touching_json(self):
         sentinel = [{"title": "x", "source": "rss", "score": None,
                      "num_comments": None, "created_utc": None, "selftext": ""}]
-        with patch.object(reddit, "_fetch_subreddit_rss", return_value=sentinel) as rss, \
-             patch.object(reddit, "urlopen",
-                          side_effect=AssertionError("JSON endpoint must not be called")):
-            out = reddit._fetch_subreddit("NVDA", "stocks", 5, 5.0)
+        with patch.dict(os.environ, {}, clear=False) as _env:
+            for var in ("REDDIT_ACCESS_TOKEN", "REDDIT_CLIENT_ID", "REDDIT_CLIENT_SECRET"):
+                os.environ.pop(var, None)
+            with patch.object(reddit, "_fetch_subreddit_rss", return_value=sentinel) as rss, \
+                 patch.object(reddit, "urlopen",
+                              side_effect=AssertionError("JSON endpoint must not be called")):
+                out = reddit._fetch_subreddit("NVDA", "stocks", 5, 5.0)
         rss.assert_called_once()
+        assert out is sentinel
+
+    def test_credentials_route_to_authenticated_json(self):
+        # OAuth quota is per client, not per IP, so configured callers must use it.
+        sentinel = [{"title": "x", "source": "json", "score": 1,
+                     "num_comments": 1, "created_utc": None, "selftext": ""}]
+        with patch.dict(os.environ, {"REDDIT_CLIENT_ID": "id", "REDDIT_CLIENT_SECRET": "sec"}), \
+             patch.object(reddit, "_fetch_subreddit_json", return_value=sentinel) as js, \
+             patch.object(reddit, "_fetch_subreddit_rss",
+                          side_effect=AssertionError("must not fall back to RSS")):
+            out = reddit._fetch_subreddit("NVDA", "stocks", 5, 5.0)
+        js.assert_called_once()
         assert out is sentinel
 
 

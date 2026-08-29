@@ -47,6 +47,9 @@ _RSS = "https://www.reddit.com/r/{sub}/search.rss?{qs}"
 _UA = os.getenv("REDDIT_USER_AGENT", "tradingagents/0.2 (+https://github.com/TauricResearch/TradingAgents)")
 _ATOM_NS = {"atom": "http://www.w3.org/2005/Atom"}
 
+# client_id -> (bearer token, expiry epoch seconds)
+_TOKEN_CACHE: dict[str, tuple[str, float]] = {}
+
 # Default subreddits ordered roughly by signal density for ticker-specific
 # discussion. wallstreetbets has the most volume but most noise; stocks /
 # investing trend more measured. Caller can override.
@@ -148,6 +151,13 @@ def _fetch_subreddit_rss(
     return posts
 
 
+def _has_reddit_credentials() -> bool:
+    """Whether OAuth is configured, without performing any network I/O."""
+    if (os.getenv("REDDIT_ACCESS_TOKEN") or "").strip():
+        return True
+    return bool(os.getenv("REDDIT_CLIENT_ID") and os.getenv("REDDIT_CLIENT_SECRET"))
+
+
 def _get_reddit_access_token() -> str | None:
     """Return a bearer token for the authenticated Reddit API when configured.
 
@@ -165,6 +175,12 @@ def _get_reddit_access_token() -> str | None:
     if not client_id or not client_secret:
         return None
 
+    # One token serves every symbol/subreddit in a run; re-minting per request
+    # would multiply calls against the very limit we are trying to escape.
+    cached = _TOKEN_CACHE.get(client_id)
+    if cached and cached[1] > time.time():
+        return cached[0]
+
     auth = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode("ascii")
     data = urlencode({"grant_type": "client_credentials"}).encode("utf-8")
     req = Request(
@@ -181,6 +197,8 @@ def _get_reddit_access_token() -> str | None:
             payload = json.loads(resp.read())
         token = (payload.get("access_token") or "").strip()
         if token:
+            expires_in = float(payload.get("expires_in") or 3600)
+            _TOKEN_CACHE[client_id] = (token, time.time() + max(expires_in - 60, 60))
             return token
     except (OSError, http.client.HTTPException, json.JSONDecodeError, ValueError) as exc:
         logger.warning("Reddit OAuth token fetch failed: %s", exc)
@@ -251,12 +269,15 @@ def _fetch_subreddit(
     limit: int,
     timeout: float,
 ) -> list[dict]:
-    """Fetch one subreddit, RSS-first.
+    """Fetch one subreddit: authenticated JSON when configured, else RSS.
 
-    The JSON search endpoint is reliably WAF-blocked (403) for public clients,
-    so we go straight to the RSS feed — which serves our identified User-Agent
-    reliably — halving our request volume against Reddit's per-IP rate limit.
+    For public clients the JSON search endpoint is reliably WAF-blocked (403)
+    and the RSS feed is throttled per IP, so they stay RSS-first to avoid
+    burning rate-limit budget. OAuth quota is charged per client rather than
+    per IP, so configured callers use the richer JSON path instead.
     """
+    if _has_reddit_credentials():
+        return _fetch_subreddit_json(ticker, sub, limit, timeout)
     return _fetch_subreddit_rss(ticker, sub, limit, timeout)
 
 

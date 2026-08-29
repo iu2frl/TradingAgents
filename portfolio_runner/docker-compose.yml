@@ -26,6 +26,12 @@ services:
       # --- Optional data vendors ----------------------------------------
       ALPHA_VANTAGE_API_KEY: ${ALPHA_VANTAGE_API_KEY:-}
       FRED_API_KEY: ${FRED_API_KEY:-}
+      # Reddit OAuth: quota is per client instead of per IP, which is what the
+      # public RSS feed gets throttled on. Create a "script" app at
+      # https://www.reddit.com/prefs/apps to obtain these.
+      REDDIT_CLIENT_ID: ${REDDIT_CLIENT_ID:-}
+      REDDIT_CLIENT_SECRET: ${REDDIT_CLIENT_SECRET:-}
+      REDDIT_USER_AGENT: ${REDDIT_USER_AGENT:-}
 
       # --- Portfolio ----------------------------------------------------
       PORTFOLIO_SYMBOLS: ${PORTFOLIO_SYMBOLS:-AAPL,MSFT,NVDA,AMZN,GOOGL}
